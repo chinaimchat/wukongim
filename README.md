@@ -7,6 +7,16 @@ A high-performance universal communication service, refined over 10 years (2015-
 
 `Windows is no longer supported`
 
+### Build from source (local)
+
+`web/dist` and `demo/chatdemo/dist` are **not** checked into Git; `main.go` uses `go:embed` for those trees, so you must build the frontends before `go build`. One-shot (requires Node.js and [Yarn](https://yarnpkg.com/)):
+
+```bash
+make build-native
+```
+
+Manual equivalent: run `yarn install && yarn build` in `demo/chatdemo` and in `web`, then from the repo root `go build -o wukongim .`. The Dockerfiles already run the frontend builds inside the image.
+
 
 
 Key Features of Distributed IM: Automatic failover, decentralized design, data redundancy between nodes, fast auto-scaling, proxy node mechanism

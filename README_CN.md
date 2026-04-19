@@ -7,6 +7,16 @@
 
 `不再支持Windows系统`
 
+### 从源码本地编译
+
+`web/dist` 与 `demo/chatdemo/dist` 由 Vite 生成、**不纳入 Git**；`main.go` 通过 `go:embed` 嵌入上述目录，因此直接 `go build` 前须先构建前端。一键方式（需已安装 Node.js 与 [Yarn](https://yarnpkg.com/)）：
+
+```bash
+make build-native
+```
+
+等价手动步骤：`demo/chatdemo` 与 `web` 目录内各执行 `yarn install && yarn build`，然后在仓库根目录执行 `go build -o wukongim .`。Docker 镜像构建已在 Dockerfile 内包含上述前端步骤。
+
 
 
 分布式IM重要特性： 故障自动转移，去中心化设计，节点之间数据互备，支持集群快速自动扩容，代理节点机制

@@ -1,3 +1,13 @@
+# 监控台 web/ 与聊天 Demo demo/chatdemo/ 的 dist 不入库；main.go 使用 go:embed，需先 yarn build 再 go build。
+.PHONY: build-frontend build-native
+
+build-frontend:
+	cd demo/chatdemo && yarn install && yarn build
+	cd web && yarn install && yarn build
+
+build-native: build-frontend
+	go build -o wukongim .
+
 build:
 	docker build -t wukongim .
 push:
