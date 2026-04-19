@@ -45,3 +45,7 @@ wukongim*_data/
 external_ip.txt
 
 wukongim.pid
+
+# 前端 Vite 构建产物（勿提交，各目录执行 npm/pnpm/yarn build 生成）
+web/dist/
+demo/chatdemo/dist/
