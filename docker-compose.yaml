@@ -28,8 +28,8 @@ services:
       - 5300:5300 # 管理端端口
       - 5172:5172 # demo端口
       - 11110:11110 # 分布式节点通讯端口
-  prometheus:  # 监控服务
-    image: registry.cn-shanghai.aliyuncs.com/wukongim/prometheus:v2.53.1
+  prometheus:  # 监控服务（Docker Hub 官方镜像）
+    image: prom/prometheus:v2.53.1
     volumes:
       - "./prometheus.yml:/etc/prometheus/prometheus.yml"
     ports:
