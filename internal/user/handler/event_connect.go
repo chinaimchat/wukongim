@@ -66,26 +66,28 @@ func (h *Handler) handleConnect(event *eventbus.Event) (wkproto.ReasonCode, *wkp
 		connectPacket = event.Frame.(*wkproto.ConnectPacket)
 		devceLevel    wkproto.DeviceLevel
 		uid           = connectPacket.UID
+		traceID       = shortTraceID(connectPacket.UID, connectPacket.Token)
+		connTrace     = connTraceID(conn)
 	)
 	// -------------------- token verify --------------------
 	if connectPacket.UID == options.G.ManagerUID {
 		if options.G.ManagerTokenOn && connectPacket.Token != options.G.ManagerToken {
-			h.Error("manager token verify fail", zap.String("uid", uid), zap.String("token", connectPacket.Token))
+			h.Error("manager token verify fail", zap.String("uid", uid), zap.String("token", connectPacket.Token), zap.String("trace_id", traceID), zap.String("conn_trace", connTrace))
 			return wkproto.ReasonAuthFail, nil, nil
 		}
 		devceLevel = wkproto.DeviceLevelSlave // 默认都是slave设备
 	} else if options.G.TokenAuthOn && !options.G.IsVisitors(uid) { // 如果开启了token验证，并且不是访客用户
 		if connectPacket.Token == "" {
-			h.Error("token is empty", zap.String("uid", uid), zap.Uint64("sourceNodeId", event.SourceNodeId))
+			h.Error("token is empty", zap.String("uid", uid), zap.Uint64("sourceNodeId", event.SourceNodeId), zap.String("trace_id", traceID), zap.String("conn_trace", connTrace))
 			return wkproto.ReasonAuthFail, nil, errors.New("token is empty")
 		}
 		device, err := service.Store.GetDevice(uid, connectPacket.DeviceFlag)
 		if err != nil {
-			h.Error("get device token err", zap.Error(err), zap.String("uid", uid), zap.String("deviceFlag", connectPacket.DeviceFlag.String()), zap.Uint64("sourceNodeId", event.SourceNodeId))
+			h.Error("get device token err", zap.Error(err), zap.String("uid", uid), zap.String("deviceFlag", connectPacket.DeviceFlag.String()), zap.Uint64("sourceNodeId", event.SourceNodeId), zap.String("trace_id", traceID), zap.String("conn_trace", connTrace))
 			return wkproto.ReasonAuthFail, nil, err
 		}
 		if device.Token != connectPacket.Token {
-			h.Error("token verify fail", zap.String("uid", uid), zap.Uint64("sourceNodeId", event.SourceNodeId), zap.String("expectToken", device.Token), zap.String("actToken", connectPacket.Token))
+			h.Error("token verify fail", zap.String("uid", uid), zap.Uint64("sourceNodeId", event.SourceNodeId), zap.String("expectToken", device.Token), zap.String("actToken", connectPacket.Token), zap.String("trace_id", traceID), zap.String("conn_trace", connTrace))
 			return wkproto.ReasonAuthFail, nil, errors.New("token verify fail")
 		}
 		devceLevel = wkproto.DeviceLevel(device.DeviceLevel)
@@ -104,7 +106,7 @@ func (h *Handler) handleConnect(event *eventbus.Event) (wkproto.ReasonCode, *wkp
 		ban = userChannelInfo.Ban
 	}
 	if ban {
-		h.Error("device is ban", zap.String("uid", uid))
+		h.Error("device is ban", zap.String("uid", uid), zap.String("trace_id", traceID), zap.String("conn_trace", connTrace))
 		return wkproto.ReasonBan, nil, errors.New("device is ban")
 	}
 
@@ -138,11 +140,15 @@ func (h *Handler) handleConnect(event *eventbus.Event) (wkproto.ReasonCode, *wkp
 						zap.String("uid", uid),
 						zap.String("deviceID", connectPacket.DeviceID),
 						zap.String("oldDeviceId", oldConn.DeviceId),
+						zap.String("trace_id", traceID),
+						zap.String("conn_trace", connTrace),
 					)
 					eventbus.User.ConnWrite(event.ReqId, oldConn, &wkproto.DisconnectPacket{
 						ReasonCode: wkproto.ReasonConnectKick,
 						Reason:     "login in other device",
 					})
+					// 先从逻辑连接池移除，避免延迟关闭窗口内被重复命中导致反复踢旧连接。
+					eventbus.User.DirectRemoveConn(oldConn)
 					service.CommonService.AfterFunc(time.Second*2, func(od *eventbus.Conn) func() {
 						return func() {
 							eventbus.User.CloseConn(od)
@@ -150,6 +156,8 @@ func (h *Handler) handleConnect(event *eventbus.Event) (wkproto.ReasonCode, *wkp
 					}(oldConn))
 				} else {
 					// 相同设备Id，只关闭连接，不进行踢操作
+					// 先从逻辑连接池移除，避免延迟关闭窗口内被重复命中导致反复关闭。
+					eventbus.User.DirectRemoveConn(oldConn)
 					service.CommonService.AfterFunc(time.Second*2, func(od *eventbus.Conn) func() {
 						return func() {
 							eventbus.User.CloseConn(od)
@@ -157,13 +165,15 @@ func (h *Handler) handleConnect(event *eventbus.Event) (wkproto.ReasonCode, *wkp
 
 					}(oldConn))
 				}
-				h.Info("auth: close old conn for master", zap.Any("oldConn", oldConn))
+				h.Info("auth: close old conn for master", zap.Any("oldConn", oldConn), zap.String("trace_id", traceID), zap.String("conn_trace", connTrace))
 			}
 		} else if devceLevel == wkproto.DeviceLevelSlave { // 如果设备是slave级别，则把相同的deviceId关闭
 			for _, oldConn := range oldConns {
 				if oldConn.ConnId != conn.ConnId && oldConn.DeviceId == connectPacket.DeviceID {
+					// 先从逻辑连接池移除，避免延迟关闭窗口内同设备旧连接被重复命中。
+					eventbus.User.DirectRemoveConn(oldConn)
 					service.CommonService.AfterFunc(time.Second*2, func(od *eventbus.Conn) func() {
-						h.Info("auth: close old conn for slave", zap.Any("oldConn", oldConn), zap.Int64("oldConnId", oldConn.ConnId), zap.Int64("newConnId", conn.ConnId))
+						h.Info("auth: close old conn for slave", zap.Any("oldConn", oldConn), zap.Int64("oldConnId", oldConn.ConnId), zap.Int64("newConnId", conn.ConnId), zap.String("trace_id", traceID), zap.String("conn_trace", connTrace))
 						return func() {
 							eventbus.User.CloseConn(od)
 						}
@@ -207,9 +217,9 @@ func (h *Handler) handleConnect(event *eventbus.Event) (wkproto.ReasonCode, *wkp
 	}
 
 	if realConn != nil {
-		h.Debug("auth: auth Success", zap.String("uid", conn.Uid), zap.Int64("connId", conn.ConnId), zap.Int("fd", realConn.Fd().Fd()), zap.Uint8("protoVersion", connectPacket.Version), zap.Bool("hasServerVersion", hasServerVersion))
+		h.Debug("auth: auth Success", zap.String("uid", conn.Uid), zap.Int64("connId", conn.ConnId), zap.Int("fd", realConn.Fd().Fd()), zap.Uint8("protoVersion", connectPacket.Version), zap.Bool("hasServerVersion", hasServerVersion), zap.String("trace_id", traceID), zap.String("conn_trace", connTrace))
 	} else {
-		h.Debug("auth: auth Success", zap.String("uid", conn.Uid), zap.Int64("connId", conn.ConnId), zap.Uint8("protoVersion", connectPacket.Version), zap.Bool("hasServerVersion", hasServerVersion))
+		h.Debug("auth: auth Success", zap.String("uid", conn.Uid), zap.Int64("connId", conn.ConnId), zap.Uint8("protoVersion", connectPacket.Version), zap.Bool("hasServerVersion", hasServerVersion), zap.String("trace_id", traceID), zap.String("conn_trace", connTrace))
 	}
 	connack := &wkproto.ConnackPacket{
 		Salt:          string(aesIV),

@@ -38,6 +38,7 @@ func (h *Handler) handleOnSend(event *eventbus.Event) {
 	event.Track.Record(track.PositionUserOnSend)
 
 	conn := event.Conn
+	connTrace := connTraceID(conn)
 	from := conn.Uid
 	sendPacket := event.Frame.(*wkproto.SendPacket)
 	channelId := sendPacket.ChannelID
@@ -60,12 +61,13 @@ func (h *Handler) handleOnSend(event *eventbus.Event) {
 			zap.Int64("connId", event.Conn.ConnId),
 			zap.String("channelId", fakeChannelId),
 			zap.Uint8("channelType", channelType),
+			zap.String("conn_trace", connTrace),
 		)
 	}
 
 	reasonCode, err := h.checkGlobalSendPermission(from)
 	if err != nil {
-		h.Error("checkGlobalSendPermission error", zap.Error(err), zap.String("uid", from))
+		h.Error("checkGlobalSendPermission error", zap.Error(err), zap.String("uid", from), zap.String("conn_trace", connTrace))
 		sendack := &wkproto.SendackPacket{
 			Framer:      sendPacket.Framer,
 			MessageID:   event.MessageId,
@@ -78,7 +80,7 @@ func (h *Handler) handleOnSend(event *eventbus.Event) {
 	}
 
 	if reasonCode != wkproto.ReasonSuccess {
-		h.Warn("checkGlobalSendPermission failed", zap.String("uid", from), zap.String("reasonCode", reasonCode.String()))
+		h.Warn("checkGlobalSendPermission failed", zap.String("uid", from), zap.String("reasonCode", reasonCode.String()), zap.String("conn_trace", connTrace))
 		sendack := &wkproto.SendackPacket{
 			Framer:      sendPacket.Framer,
 			MessageID:   event.MessageId,
@@ -94,7 +96,7 @@ func (h *Handler) handleOnSend(event *eventbus.Event) {
 	if !options.G.DisableEncryption && !conn.IsJsonRpc {
 		newPayload, err := h.decryptPayload(sendPacket, conn)
 		if err != nil {
-			h.Error("handleOnSend: Failed to decrypt payload！", zap.Error(err), zap.String("uid", conn.Uid), zap.String("channelId", channelId), zap.Uint8("channelType", channelType))
+			h.Error("handleOnSend: Failed to decrypt payload！", zap.Error(err), zap.String("uid", conn.Uid), zap.String("channelId", channelId), zap.Uint8("channelType", channelType), zap.String("conn_trace", connTrace))
 			sendack := &wkproto.SendackPacket{
 				Framer:      sendPacket.Framer,
 				MessageID:   event.MessageId,
@@ -114,7 +116,7 @@ func (h *Handler) handleOnSend(event *eventbus.Event) {
 	// 调用插件
 	reason, err := h.pluginInvokeSend(sendPacket, event)
 	if err != nil || reason != wkproto.ReasonSuccess {
-		h.Info("handleOnSend: plugin return error reason", zap.Error(err), zap.Uint8("reason", uint8(reason)), zap.String("uid", conn.Uid), zap.String("channelId", channelId), zap.Uint8("channelType", channelType))
+		h.Info("handleOnSend: plugin return error reason", zap.Error(err), zap.Uint8("reason", uint8(reason)), zap.String("uid", conn.Uid), zap.String("channelId", channelId), zap.Uint8("channelType", channelType), zap.String("conn_trace", connTrace))
 		sendack := &wkproto.SendackPacket{
 			Framer:      sendPacket.Framer,
 			MessageID:   event.MessageId,
@@ -233,13 +235,13 @@ func (h *Handler) sendPacketIsVail(sendPacket *wkproto.SendPacket, conn *eventbu
 
 	actMsgKey, err := wkutil.AesEncryptPkcs7Base64(signBuff.Bytes(), aesKey, aesIV)
 	if err != nil {
-		h.Error("msgKey is illegal！", zap.Error(err), zap.String("sign", signStr), zap.String("aesKey", string(aesKey)), zap.String("aesIV", string(aesIV)), zap.Any("conn", conn))
+		h.Error("msgKey is illegal！", zap.Error(err), zap.String("sign", signStr), zap.String("aesKey", string(aesKey)), zap.String("aesIV", string(aesIV)), zap.Any("conn", conn), zap.String("conn_trace", connTraceID(conn)))
 		return false, err
 	}
 	actMsgKeyStr := sendPacket.MsgKey
 	exceptMsgKey := wkutil.MD5Bytes(actMsgKey)
 	if actMsgKeyStr != exceptMsgKey {
-		h.Error("msgKey is illegal！", zap.String("except", exceptMsgKey), zap.String("act", actMsgKeyStr), zap.String("sign", signStr), zap.String("aesKey", string(aesKey)), zap.String("aesIV", string(aesIV)), zap.Any("conn", conn))
+		h.Error("msgKey is illegal！", zap.String("except", exceptMsgKey), zap.String("act", actMsgKeyStr), zap.String("sign", signStr), zap.String("aesKey", string(aesKey)), zap.String("aesIV", string(aesIV)), zap.Any("conn", conn), zap.String("conn_trace", connTraceID(conn)))
 		return false, errors.New("msgKey is illegal！")
 	}
 	return true, nil

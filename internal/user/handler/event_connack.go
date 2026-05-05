@@ -34,6 +34,19 @@ func (h *Handler) connack(ctx *eventbus.UserContext) {
 			connack.NodeId = options.G.Cluster.NodeId
 			// 更新连接
 			eventbus.User.UpdateConn(conn)
+			h.Debug("connack success",
+				zap.String("uid", uid),
+				zap.Int64("connId", conn.ConnId),
+				zap.Uint64("nodeId", conn.NodeId),
+				zap.String("conn_trace", connTraceID(conn)),
+			)
+		} else {
+			h.Warn("connack failed",
+				zap.String("uid", uid),
+				zap.Int64("connId", conn.ConnId),
+				zap.String("reason", connack.ReasonCode.String()),
+				zap.String("conn_trace", connTraceID(conn)),
+			)
 		}
 		eventbus.User.ConnWrite(event.ReqId, conn, connack)
 	}
